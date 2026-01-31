@@ -1,0 +1,22 @@
+# Quarter-cylinder mesh configuration
+# All values can be adjusted; defaults mirror the script's fallbacks.
+
+length: 10.0               # cylinder length along +z [m]
+radius: 20.0              # outer radius [m]
+axial_cells: 20           # cells along axis
+radial_cells: 8           # cells from wall to core
+tangential_cells: 12      # cells around 90° arc
+
+# Set to a float for first-cell thickness at the wall; keep null for uniform radial cells
+wall_thickness: null
+
+wall_patch: solidCylinder    # curved quarter-cylinder wall → matches BC solidCylinder
+symmetry_patch: symmetryPlane # use a single symmetry patch name to match polyMesh
+symmetry_patch_type: symmetryPlane # ensure boundary type is symmetryPlane for OpenFOAM
+start_patch: inlet           # z = 0
+end_patch: topOutlet         # z = length (top cap)
+
+# Output locations
+output: ../system/blockMeshDict
+# Optional debug VTK path; keep null to skip
+debug_vtk: null
