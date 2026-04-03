@@ -119,6 +119,14 @@ functions
         libs            (lagrangianFunctionObjects);
         writeControl    writeTime;
     }
+
+    shearStressTensor
+    {
+        type            dsmcShearStress;
+        libs            (libdsmcShearStressFunctionObject);
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }
 }
 
 
