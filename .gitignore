@@ -1,2 +1,6 @@
+.venv/
 */0.0*
 */*e-*
+*/__pycache__/
+*/*/*/linux64*/
+*/*/lnInclude/
