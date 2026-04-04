@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -29,6 +29,25 @@ class PsiResults:
     erosion_rate: np.ndarray
     ejection_speed: np.ndarray
     ejection_angle_deg: np.ndarray
+
+
+@dataclass
+class TrajectoryPath:
+    t: np.ndarray
+    r: np.ndarray
+    z: np.ndarray
+    source_r: float
+    landing_r: float
+    flight_time: float
+    max_height: float
+
+
+@dataclass
+class TrajectoryEnsemble:
+    paths: List[TrajectoryPath]
+    landing_r: np.ndarray
+    flight_time: np.ndarray
+    max_height: np.ndarray
 
 
 def aerodynamic_forces(gas: GasSurfaceData, d_p: float) -> Tuple[np.ndarray, np.ndarray]:
@@ -183,3 +202,90 @@ def design_secondary_particle_transport() -> None:
     3. Deposit/re-impact particles and update bed source terms.
     """
     raise NotImplementedError("Design stub: secondary transport not implemented.")
+
+
+def _integrate_single_trajectory(
+    source_r: float,
+    speed: float,
+    angle_deg: float,
+    gravity: float,
+    dt: float,
+    max_time: float,
+    linear_drag: float,
+) -> TrajectoryPath:
+    angle = np.deg2rad(angle_deg)
+    vr = speed * np.cos(angle)
+    vz = speed * np.sin(angle)
+
+    t_list = [0.0]
+    r_list = [source_r]
+    z_list = [0.0]
+
+    t = 0.0
+    r = source_r
+    z = 0.0
+    while t < max_time:
+        ar = -linear_drag * vr
+        az = -gravity - linear_drag * vz
+
+        vr += ar * dt
+        vz += az * dt
+        r += vr * dt
+        z += vz * dt
+        t += dt
+
+        t_list.append(t)
+        r_list.append(r)
+        z_list.append(z)
+
+        if z <= 0.0 and t > 0.0:
+            break
+
+    t_arr = np.asarray(t_list, dtype=float)
+    r_arr = np.asarray(r_list, dtype=float)
+    z_arr = np.asarray(z_list, dtype=float)
+
+    return TrajectoryPath(
+        t=t_arr,
+        r=r_arr,
+        z=z_arr,
+        source_r=float(source_r),
+        landing_r=float(r_arr[-1]),
+        flight_time=float(t_arr[-1]),
+        max_height=float(np.max(z_arr)),
+    )
+
+
+def simulate_trajectory_ensemble(
+    result: PsiResults,
+    gravity: float,
+    n_trajectories: int = 30,
+    dt: float = 2.5e-4,
+    max_time: float = 8.0,
+    linear_drag: float = 0.0,
+) -> TrajectoryEnsemble:
+    lift_idx = np.where(result.lift_mask & (result.ejection_speed > 0.0))[0]
+    if lift_idx.size == 0:
+        return TrajectoryEnsemble(paths=[], landing_r=np.array([]), flight_time=np.array([]), max_height=np.array([]))
+
+    if lift_idx.size > n_trajectories:
+        pick = np.linspace(0, lift_idx.size - 1, n_trajectories).astype(int)
+        lift_idx = lift_idx[pick]
+
+    paths: List[TrajectoryPath] = []
+    for idx in lift_idx:
+        p = _integrate_single_trajectory(
+            source_r=float(result.r[idx]),
+            speed=float(result.ejection_speed[idx]),
+            angle_deg=float(result.ejection_angle_deg[idx]),
+            gravity=gravity,
+            dt=dt,
+            max_time=max_time,
+            linear_drag=linear_drag,
+        )
+        paths.append(p)
+
+    landing_r = np.asarray([p.landing_r for p in paths], dtype=float)
+    flight_time = np.asarray([p.flight_time for p in paths], dtype=float)
+    max_height = np.asarray([p.max_height for p in paths], dtype=float)
+    return TrajectoryEnsemble(paths=paths, landing_r=landing_r, flight_time=flight_time, max_height=max_height)

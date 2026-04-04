@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from gas_model import DSMCSurfaceExtractorConfig, FoamParseError, load_surface_data_from_case, synthetic_surface_profile
-from psi_model import run_psi_model, sweep_particle_size, sweep_plume_angle, sweep_velocity_scale
+from psi_model import run_psi_model, simulate_trajectory_ensemble, sweep_particle_size, sweep_plume_angle, sweep_velocity_scale
 from regolith_model import RegolithProperties, default_cohesion_model
 
 
@@ -31,6 +31,10 @@ class SimulationConfig:
     c_e: float = 2.0e-24
     plume_angle_deg: float = 35.0
     velocity_scale: float = 1.0
+    n_trajectories: int = 30
+    trajectory_dt: float = 2.5e-4
+    trajectory_max_time: float = 8.0
+    trajectory_linear_drag: float = 0.0
     show_plots: bool = True
 
 
@@ -65,6 +69,30 @@ def parse_args() -> argparse.Namespace:
         "--no-plots",
         action="store_true",
         help="Disable matplotlib plotting",
+    )
+    parser.add_argument(
+        "--n-trajectories",
+        type=int,
+        default=30,
+        help="Number of representative lifted-particle trajectories",
+    )
+    parser.add_argument(
+        "--trajectory-dt",
+        type=float,
+        default=2.5e-4,
+        help="Trajectory integration time step [s]",
+    )
+    parser.add_argument(
+        "--trajectory-max-time",
+        type=float,
+        default=8.0,
+        help="Maximum flight integration time [s]",
+    )
+    parser.add_argument(
+        "--trajectory-linear-drag",
+        type=float,
+        default=0.0,
+        help="Linear drag coefficient [1/s] for trajectory model",
     )
     return parser.parse_args()
 
@@ -139,7 +167,7 @@ def sanity_checks(gas, regolith: RegolithProperties, d_p: float, c_e: float) -> 
     )
 
 
-def make_plots(base_res, sweep_d, sweep_v, source_tag: str) -> None:
+def make_plots(base_res, sweep_d, sweep_v, source_tag: str, trajectories=None) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
 
     ax = axes[0, 0]
@@ -180,6 +208,23 @@ def make_plots(base_res, sweep_d, sweep_v, source_tag: str) -> None:
     ax_ej.set_ylabel("Ejection speed [m/s]")
     ax_ej.set_title("Optional ejection speed profile")
 
+    if trajectories is not None and len(trajectories.paths) > 0:
+        fig3, axes3 = plt.subplots(1, 2, figsize=(12, 4.5), constrained_layout=True)
+        ax_t = axes3[0]
+        for path in trajectories.paths:
+            ax_t.plot(path.r, path.z, alpha=0.7)
+        ax_t.set_xlabel("Radial position r [m]")
+        ax_t.set_ylabel("Height z [m]")
+        ax_t.set_title("Lifted particle trajectories")
+
+        ax_l = axes3[1]
+        source = np.array([p.source_r for p in trajectories.paths], dtype=float)
+        ax_l.scatter(source, trajectories.landing_r, s=24, alpha=0.8)
+        ax_l.plot([source.min(), source.max()], [source.min(), source.max()], "k--", lw=1)
+        ax_l.set_xlabel("Source radius [m]")
+        ax_l.set_ylabel("Landing radius [m]")
+        ax_l.set_title("Radial transport map")
+
     plt.show()
 
 
@@ -190,6 +235,10 @@ def main() -> None:
         particle_diameter=args.particle_diameter,
         velocity_scale=args.velocity_scale,
         plume_angle_deg=args.plume_angle_deg,
+        n_trajectories=args.n_trajectories,
+        trajectory_dt=args.trajectory_dt,
+        trajectory_max_time=args.trajectory_max_time,
+        trajectory_linear_drag=args.trajectory_linear_drag,
         show_plots=not args.no_plots,
     )
 
@@ -224,6 +273,15 @@ def main() -> None:
         plume_angles_deg=plume_angles,
     )
 
+    trajectories = simulate_trajectory_ensemble(
+        result,
+        gravity=cfg.gravity,
+        n_trajectories=cfg.n_trajectories,
+        dt=cfg.trajectory_dt,
+        max_time=cfg.trajectory_max_time,
+        linear_drag=cfg.trajectory_linear_drag,
+    )
+
     sanity_checks(gas, regolith, d_p=cfg.particle_diameter, c_e=cfg.c_e)
 
     print("=== PSI Prototype Summary ===")
@@ -234,9 +292,14 @@ def main() -> None:
     print(f"Lift fraction: {np.mean(result.lift_mask):.4f}")
     print(f"Integrated erosion: {_integrate_profile(result.erosion_rate, result.r):.6e}")
     print(f"Best plume-angle sweep erosion: {np.max(sweep_a['erosion_integral']):.6e}")
+    print(f"Trajectory count: {len(trajectories.paths)}")
+    if len(trajectories.paths) > 0:
+        print(f"Mean landing radius [m]: {np.mean(trajectories.landing_r):.4f}")
+        print(f"Mean flight time [s]: {np.mean(trajectories.flight_time):.4f}")
+        print(f"Mean max height [m]: {np.mean(trajectories.max_height):.4f}")
 
     if cfg.show_plots:
-        make_plots(result, sweep_d, sweep_v, source_tag=source_tag)
+        make_plots(result, sweep_d, sweep_v, source_tag=source_tag, trajectories=trajectories)
 
 
 if __name__ == "__main__":
